@@ -1,14 +1,16 @@
+// config/db.js
 import mongoose from "mongoose";
-import dns from "dns";
 
-dns.setDefaultResultOrder("ipv4first");
-
-export const connectDB = async () => {
+const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(process.env.MONGODB_URI);
-    console.log(`✅ MongoDB conectado: ${conn.connection.host}`);
+    await mongoose.connect(process.env.MONGODB_URI, {
+      dbName: "PatrimonioDB"  // ← agrega esta línea con el nombre exacto
+    });
+    console.log("MongoDB conectado ✅");
   } catch (error) {
-    console.error(`❌ Error al conectar MongoDB: ${error.message}`);
+    console.error("Error de conexión:", error.message);
     process.exit(1);
   }
 };
+
+export default connectDB;
