@@ -6,8 +6,8 @@ import mongoose from "mongoose";
  */
 const computoSchema = new mongoose.Schema(
   {
-    "NO. DE RESGUARDO": { type: Number },
-    "NO. DE INVENTARIO": { type: Number },
+    "NO. DE RESGUARDO": { type: String, trim: true },
+    "NO. DE INVENTARIO": { type: String, trim: true },
     "CLAVE ARMONIZADA": { type: String, trim: true },
     "NOMBRE DEL RESGUARDANTE": { type: String, trim: true },
     "UNIDAD ADMINISTRATIVA": { type: String, trim: true },
