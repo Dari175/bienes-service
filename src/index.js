@@ -12,10 +12,17 @@ const PORT = process.env.PORT || 3000;
 // ── Middleware ───────────────────────────────────────────────────────────────
 app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+//app.use(express.urlencoded({ extended: false }));
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
-// ── Ruta raíz (health check) ─────────────────────────────────────────────────
+app.use((req, res, next) => {
+  console.log("📦 METHOD:", req.method, req.originalUrl);
+  console.log("📦 CONTENT-TYPE:", req.headers['content-type']);
+  console.log("📦 BODY:", req.body);
+  next();
+});
+
+// ── Ruta raíz ─────────────────────────────────────────────────
 app.get("/", (req, res) => {
   res.json({
     success: true,
@@ -32,6 +39,14 @@ app.get("/", (req, res) => {
       control:   "/api/control",
       catalogo:  "/api/catalogo",
     },
+  });
+});
+
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
   });
 });
 

@@ -59,16 +59,20 @@ export const getById = async (req, res) => {
 
 export const create = async (req, res) => {
   try {
-    const doc = await Inmueble.create(req.body);
-    res.status(201).json({ success: true, message: "Inmueble creado exitosamente", data: doc });
+    await Inmueble.collection.insertOne(req.body);
+    res.status(201).json({ success: true, message: "Inmueble creado exitosamente", data: req.body });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 };
 
 export const update = async (req, res) => {
   try {
-    const doc = await Inmueble.findByIdAndUpdate(req.params.id, { $set: req.body }, { new: true }).lean();
-    if (!doc) return res.status(404).json({ success: false, message: "Inmueble no encontrado" });
-    res.json({ success: true, message: "Inmueble actualizado exitosamente", data: doc });
+    const result = await Inmueble.collection.findOneAndUpdate(
+      { _id: new Inmueble.base.Types.ObjectId(req.params.id) },
+      { $set: req.body },
+      { returnDocument: "after" }
+    );
+    if (!result.value) return res.status(404).json({ success: false, message: "Inmueble no encontrado" });
+    res.json({ success: true, message: "Inmueble actualizado exitosamente", data: result.value });
   } catch (e) {
     if (e.name === "CastError") return res.status(400).json({ success: false, message: "ID inválido" });
     res.status(500).json({ success: false, message: e.message });

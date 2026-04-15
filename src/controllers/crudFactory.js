@@ -78,11 +78,13 @@ export const createCRUDController = (Model, searchFields = []) => {
   // ── POST / ────────────────────────────────────────────────────────────
   const create = async (req, res) => {
     try {
-      const doc = await Model.create(req.body);
+      // Usamos insertOne directamente para evitar que Mongoose interprete
+      // campos con punto (ej: "NO. RESGUARDO") como rutas de campos anidados.
+      await Model.collection.insertOne(req.body);
       res.status(201).json({
         success: true,
         message: "Documento creado exitosamente",
-        data: doc,
+        data: req.body,
       });
     } catch (error) {
       if (error.name === "ValidationError") {
@@ -95,19 +97,21 @@ export const createCRUDController = (Model, searchFields = []) => {
   // ── PUT /:id ──────────────────────────────────────────────────────────
   const update = async (req, res) => {
     try {
-      const doc = await Model.findByIdAndUpdate(
-        req.params.id,
+      // Usamos findOneAndUpdate a nivel de collection para evitar que Mongoose
+      // interprete campos con punto como rutas de campos anidados.
+      const result = await Model.collection.findOneAndUpdate(
+        { _id: new Model.base.Types.ObjectId(req.params.id) },
         { $set: req.body },
-        { new: true, runValidators: true }
-      ).lean();
+        { returnDocument: "after" }
+      );
 
-      if (!doc) {
+      if (!result.value) {
         return res.status(404).json({ success: false, message: "Documento no encontrado" });
       }
       res.json({
         success: true,
         message: "Documento actualizado exitosamente",
-        data: doc,
+        data: result.value,
       });
     } catch (error) {
       if (error.name === "CastError") {

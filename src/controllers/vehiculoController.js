@@ -69,16 +69,20 @@ export const getById = async (req, res) => {
 
 export const create = async (req, res) => {
   try {
-    const doc = await Vehiculo.create(req.body);
-    res.status(201).json({ success: true, message: "Vehículo creado exitosamente", data: doc });
+    await Vehiculo.collection.insertOne(req.body);
+    res.status(201).json({ success: true, message: "Vehículo creado exitosamente", data: req.body });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 };
 
 export const update = async (req, res) => {
   try {
-    const doc = await Vehiculo.findByIdAndUpdate(req.params.id, { $set: req.body }, { new: true }).lean();
-    if (!doc) return res.status(404).json({ success: false, message: "Vehículo no encontrado" });
-    res.json({ success: true, message: "Vehículo actualizado exitosamente", data: doc });
+    const result = await Vehiculo.collection.findOneAndUpdate(
+      { _id: new Vehiculo.base.Types.ObjectId(req.params.id) },
+      { $set: req.body },
+      { returnDocument: "after" }
+    );
+    if (!result.value) return res.status(404).json({ success: false, message: "Vehículo no encontrado" });
+    res.json({ success: true, message: "Vehículo actualizado exitosamente", data: result.value });
   } catch (e) {
     if (e.name === "CastError") return res.status(400).json({ success: false, message: "ID inválido" });
     res.status(500).json({ success: false, message: e.message });
