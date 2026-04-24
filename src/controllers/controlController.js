@@ -1,6 +1,7 @@
 import Control from "../models/Control.js";
+import { createCRUDController } from "../utils/crudFactory.js";
 
-// Todos los campos string de bienes_control (16 campos)
+// Campos de búsqueda (los tuyos originales)
 const SEARCH_FIELDS = [
   "NO. RESGUARDO",
   "NO. DE INVENTARIO",
@@ -17,79 +18,66 @@ const SEARCH_FIELDS = [
   "FECHA DE ADQUISICIÓN",
   "VALOR DE ADQUISICIÓN",
   "CONDICIÓN FÍSICA DEL BIEN",
-  "OBSERVACIÓNES",              // así está escrito en la BD (con acento)
+  "OBSERVACIÓNES",
 ];
 
-export const getAll = async (req, res) => {
-  try {
-    const { q, page = 1, limit = 50, unidad, condicion, resguardante } = req.query;
-    const pageNum = Math.max(1, parseInt(page));
-    const limitNum = Math.min(200, Math.max(1, parseInt(limit)));
-    const filter = {};
-    if (q) { const r = new RegExp(q, "i"); filter.$or = SEARCH_FIELDS.map((f) => ({ [f]: r })); }
-    if (unidad)       filter["UNIDAD ADMINISTRATIVA"]     = new RegExp(unidad, "i");
-    if (condicion)    filter["CONDICIÓN FÍSICA DEL BIEN"] = new RegExp(condicion, "i");
-    if (resguardante) filter["NOMBRE DEL RESGUARDANTE"]   = new RegExp(resguardante, "i");
-    const [docs, total] = await Promise.all([
-      Control.find(filter).skip((pageNum - 1) * limitNum).limit(limitNum).lean(),
-      Control.countDocuments(filter),
-    ]);
-    res.json({ success: true, total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum), data: docs });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
-};
+// 🔥 base del factory
+const base = createCRUDController(Control, SEARCH_FIELDS);
 
+// ─────────────────────────────────────────────
+// CRUD (automático con soft delete)
+export const getAll = base.getAll;
+export const getById = base.getById;
+export const create = base.create;
+export const update = base.update;
+export const patch = base.patch;
+export const remove = base.remove;
+
+// ─────────────────────────────────────────────
+// 🔥 STATS (personalizado, lo conservas)
 export const getStats = async (req, res) => {
   try {
     const [total, porCondicion, porUnidad] = await Promise.all([
-      Control.countDocuments(),
-      Control.aggregate([{ $group: { _id: "$CONDICIÓN FÍSICA DEL BIEN", count: { $sum: 1 } } }, { $sort: { count: -1 } }]),
-      Control.aggregate([{ $group: { _id: "$UNIDAD ADMINISTRATIVA", count: { $sum: 1 } } }, { $sort: { count: -1 } }, { $limit: 10 }]),
+      // 🔥 solo activos
+      Control.countDocuments({ estado: { $ne: "baja" } }),
+
+      Control.aggregate([
+        { $match: { estado: { $ne: "baja" } } },
+        {
+          $group: {
+            _id: "$CONDICIÓN FÍSICA DEL BIEN",
+            count: { $sum: 1 }
+          }
+        },
+        { $sort: { count: -1 } }
+      ]),
+
+      Control.aggregate([
+        { $match: { estado: { $ne: "baja" } } },
+        {
+          $group: {
+            _id: "$UNIDAD ADMINISTRATIVA",
+            count: { $sum: 1 }
+          }
+        },
+        { $sort: { count: -1 } },
+        { $limit: 10 }
+      ])
     ]);
-    res.json({ success: true, data: { total, por_condicion: porCondicion, top_unidades: porUnidad } });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
-};
 
-export const getById = async (req, res) => {
-  try {
-    const doc = await Control.findById(req.params.id).lean();
-    if (!doc) return res.status(404).json({ success: false, message: "Bien de control no encontrado" });
-    res.json({ success: true, data: doc });
+    res.json({
+      success: true,
+      data: {
+        total,
+        por_condicion: porCondicion,
+        top_unidades: porUnidad
+      }
+    });
+
   } catch (e) {
-    if (e.name === "CastError") return res.status(400).json({ success: false, message: "ID inválido" });
-    res.status(500).json({ success: false, message: e.message });
-  }
-};
-
-export const create = async (req, res) => {
-  try {
-    await Control.collection.insertOne(req.body);
-    res.status(201).json({ success: true, message: "Bien de control creado exitosamente", data: req.body });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
-};
-
-export const update = async (req, res) => {
-  try {
-    const result = await Control.collection.findOneAndUpdate(
-      { _id: new Control.base.Types.ObjectId(req.params.id) },
-      { $set: req.body },
-      { returnDocument: "after" }
-    );
-    if (!result.value) return res.status(404).json({ success: false, message: "Bien de control no encontrado" });
-    res.json({ success: true, message: "Bien de control actualizado exitosamente", data: result.value });
-  } catch (e) {
-    if (e.name === "CastError") return res.status(400).json({ success: false, message: "ID inválido" });
-    res.status(500).json({ success: false, message: e.message });
-  }
-};
-export const patch = update;
-
-export const remove = async (req, res) => {
-  try {
-    const doc = await Control.findByIdAndDelete(req.params.id).lean();
-    if (!doc) return res.status(404).json({ success: false, message: "Bien de control no encontrado" });
-    res.json({ success: true, message: "Bien de control eliminado exitosamente", data: { _id: doc._id } });
-  } catch (e) {
-    if (e.name === "CastError") return res.status(400).json({ success: false, message: "ID inválido" });
-    res.status(500).json({ success: false, message: e.message });
+    res.status(500).json({
+      success: false,
+      message: e.message
+    });
   }
 };

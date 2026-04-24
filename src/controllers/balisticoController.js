@@ -1,6 +1,7 @@
 import Balistico from "../models/Balistico.js";
+import { createCRUDController } from "../utils/crudFactory.js";
 
-// Todos los campos de bienes_generales_equipo_balistico (7 campos)
+// campos de búsqueda
 const SEARCH_FIELDS = [
   "Nombre del resguardante",
   "Descripción",
@@ -10,76 +11,37 @@ const SEARCH_FIELDS = [
   "Observaciones",
 ];
 
-export const getAll = async (req, res) => {
-  try {
-    const { q, page = 1, limit = 50, resguardante } = req.query;
-    const pageNum = Math.max(1, parseInt(page));
-    const limitNum = Math.min(200, Math.max(1, parseInt(limit)));
-    const filter = {};
-    if (q) { const r = new RegExp(q, "i"); filter.$or = SEARCH_FIELDS.map((f) => ({ [f]: r })); }
-    if (resguardante) filter["Nombre del resguardante"] = new RegExp(resguardante, "i");
-    const [docs, total] = await Promise.all([
-      Balistico.find(filter).skip((pageNum - 1) * limitNum).limit(limitNum).lean(),
-      Balistico.countDocuments(filter),
-    ]);
-    res.json({ success: true, total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum), data: docs });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
-};
+// 🔥 base del factory
+const base = createCRUDController(Balistico, SEARCH_FIELDS);
 
+// ─────────────────────────────────────────────
+// reutilizas TODO lo genérico
+export const getAll = base.getAll;
+export const getById = base.getById;
+export const create = base.create;
+export const update = base.update;
+export const patch = base.patch;
+export const remove = base.remove;
+
+// ─────────────────────────────────────────────
+// mantienes lo personalizado (NO lo pierdes)
 export const getStats = async (req, res) => {
   try {
     const [total, porTipo] = await Promise.all([
-      Balistico.countDocuments(),
+      Balistico.countDocuments({ estado: { $ne: "baja" } }),
       Balistico.aggregate([
+        { $match: { estado: { $ne: "baja" } } },
         { $group: { _id: "$Descripción", totalUnidades: { $sum: "$Unidad" }, registros: { $sum: 1 } } },
         { $sort: { totalUnidades: -1 } },
       ]),
     ]);
-    res.json({ success: true, data: { total, por_tipo: porTipo } });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
-};
 
-export const getById = async (req, res) => {
-  try {
-    const doc = await Balistico.findById(req.params.id).lean();
-    if (!doc) return res.status(404).json({ success: false, message: "Equipo balístico no encontrado" });
-    res.json({ success: true, data: doc });
+    res.json({
+      success: true,
+      data: { total, por_tipo: porTipo }
+    });
+
   } catch (e) {
-    if (e.name === "CastError") return res.status(400).json({ success: false, message: "ID inválido" });
-    res.status(500).json({ success: false, message: e.message });
-  }
-};
-
-export const create = async (req, res) => {
-  try {
-    await Balistico.collection.insertOne(req.body);
-    res.status(201).json({ success: true, message: "Equipo balístico creado exitosamente", data: req.body });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
-};
-
-export const update = async (req, res) => {
-  try {
-    const result = await Balistico.collection.findOneAndUpdate(
-      { _id: new Balistico.base.Types.ObjectId(req.params.id) },
-      { $set: req.body },
-      { returnDocument: "after" }
-    );
-    if (!result.value) return res.status(404).json({ success: false, message: "Equipo balístico no encontrado" });
-    res.json({ success: true, message: "Equipo balístico actualizado exitosamente", data: result.value });
-  } catch (e) {
-    if (e.name === "CastError") return res.status(400).json({ success: false, message: "ID inválido" });
-    res.status(500).json({ success: false, message: e.message });
-  }
-};
-export const patch = update;
-
-export const remove = async (req, res) => {
-  try {
-    const doc = await Balistico.findByIdAndDelete(req.params.id).lean();
-    if (!doc) return res.status(404).json({ success: false, message: "Equipo balístico no encontrado" });
-    res.json({ success: true, message: "Equipo balístico eliminado exitosamente", data: { _id: doc._id } });
-  } catch (e) {
-    if (e.name === "CastError") return res.status(400).json({ success: false, message: "ID inválido" });
     res.status(500).json({ success: false, message: e.message });
   }
 };

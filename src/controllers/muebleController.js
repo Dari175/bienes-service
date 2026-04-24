@@ -1,6 +1,7 @@
 import Mueble from "../models/Mueble.js";
+import { createCRUDController } from "../utils/crudFactory.js";
 
-// Todos los campos string de la colección bienes_generales_muebles
+// Campos de búsqueda (los tuyos originales)
 const SEARCH_FIELDS = [
   "NO. DE RESGUARDO",
   "NO. DE INVENTARIO",
@@ -13,39 +14,44 @@ const SEARCH_FIELDS = [
   "MODELO",
   "NO. DE SERIE",
   "FACTURA O DOCUMENTO QUE AMPARA",
-  "FECHA DE ADQUISICIÓN ",   // tiene espacio al final en la BD
+  "FECHA DE ADQUISICIÓN ",
   "VALOR DE ADQUISICIÓN",
   "CONDICIÓN FÍSICA DEL BIEN",
 ];
 
-export const getAll = async (req, res) => {
+// 🔥 base
+const base = createCRUDController(Mueble, SEARCH_FIELDS);
+
+// ─────────────────────────────────────────────
+// CRUD (factory)
+export const getAll = base.getAll;
+export const getById = base.getById;
+export const update = base.update;
+export const patch = base.patch;
+export const remove = base.remove;
+
+// ─────────────────────────────────────────────
+// 🔥 CREATE (mantienes tu fix especial)
+export const create = async (req, res) => {
   try {
-    const { q, page = 1, limit = 50, unidad, condicion, resguardante } = req.query;
-    const pageNum = Math.max(1, parseInt(page));
-    const limitNum = Math.min(200, Math.max(1, parseInt(limit)));
-    const filter = {};
+    console.log("🔥 BODY JUSTO ANTES DE GUARDAR:", req.body);
 
-    if (q) {
-      const r = new RegExp(q, "i");
-      filter.$or = SEARCH_FIELDS.map((f) => ({ [f]: r }));
-    }
+    const doc = {
+      ...req.body,
+      estado: "activo",
+      historial: [{
+        accion: "create",
+        por: req.user?.id || "sistema",
+        fecha: new Date()
+      }]
+    };
 
-    if (unidad)       filter["UNIDAD ADMINISTRATIVA"]     = new RegExp(unidad, "i");
-    if (condicion)    filter["CONDICIÓN FÍSICA DEL BIEN"] = new RegExp(condicion, "i");
-    if (resguardante) filter["NOMBRE DEL RESGUARDANTE"]   = new RegExp(resguardante, "i");
+    const result = await Mueble.collection.insertOne(doc);
 
-    const [docs, total] = await Promise.all([
-      Mueble.find(filter).skip((pageNum - 1) * limitNum).limit(limitNum).lean(),
-      Mueble.countDocuments(filter),
-    ]);
-
-    res.json({
+    res.status(201).json({
       success: true,
-      total,
-      page: pageNum,
-      limit: limitNum,
-      pages: Math.ceil(total / limitNum),
-      data: docs
+      message: "Mueble creado exitosamente",
+      data: result.ops?.[0] || doc
     });
 
   } catch (e) {
@@ -53,15 +59,21 @@ export const getAll = async (req, res) => {
   }
 };
 
+// ─────────────────────────────────────────────
+// 🔥 STATS (igual pero filtrando eliminados)
 export const getStats = async (req, res) => {
   try {
     const [total, porCondicion, porUnidad] = await Promise.all([
-      Mueble.countDocuments(),
+      Mueble.countDocuments({ estado: { $ne: "baja" } }),
+
       Mueble.aggregate([
+        { $match: { estado: { $ne: "baja" } } },
         { $group: { _id: "$CONDICIÓN FÍSICA DEL BIEN", count: { $sum: 1 } } },
         { $sort: { count: -1 } }
       ]),
+
       Mueble.aggregate([
+        { $match: { estado: { $ne: "baja" } } },
         { $group: { _id: "$UNIDAD ADMINISTRATIVA", count: { $sum: 1 } } },
         { $sort: { count: -1 } },
         { $limit: 10 }
@@ -78,101 +90,6 @@ export const getStats = async (req, res) => {
     });
 
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
-  }
-};
-
-export const getById = async (req, res) => {
-  try {
-    const doc = await Mueble.findById(req.params.id).lean();
-    if (!doc) {
-      return res.status(404).json({
-        success: false,
-        message: "Mueble no encontrado"
-      });
-    }
-
-    res.json({ success: true, data: doc });
-
-  } catch (e) {
-    if (e.name === "CastError") {
-      return res.status(400).json({ success: false, message: "ID inválido" });
-    }
-    res.status(500).json({ success: false, message: e.message });
-  }
-};
-
-export const create = async (req, res) => {
-  try {
-    console.log("🔥 BODY JUSTO ANTES DE GUARDAR:", req.body);
-
-    // 🔥 AQUÍ ESTÁ EL FIX REAL
-    const result = await Mueble.collection.insertOne(req.body);
-
-    res.status(201).json({
-      success: true,
-      message: "Mueble creado exitosamente",
-      data: result.ops?.[0] || req.body
-    });
-
-  } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
-  }
-};
-
-export const update = async (req, res) => {
-  try {
-    // 🔥 TAMBIÉN APLICAMOS FIX AQUÍ
-    const result = await Mueble.collection.findOneAndUpdate(
-      { _id: new Mueble.base.Types.ObjectId(req.params.id) },
-      { $set: req.body },
-      { returnDocument: "after" }
-    );
-
-    if (!result.value) {
-      return res.status(404).json({
-        success: false,
-        message: "Mueble no encontrado"
-      });
-    }
-
-    res.json({
-      success: true,
-      message: "Mueble actualizado exitosamente",
-      data: result.value
-    });
-
-  } catch (e) {
-    if (e.name === "CastError") {
-      return res.status(400).json({ success: false, message: "ID inválido" });
-    }
-    res.status(500).json({ success: false, message: e.message });
-  }
-};
-
-export const patch = update;
-
-export const remove = async (req, res) => {
-  try {
-    const doc = await Mueble.findByIdAndDelete(req.params.id).lean();
-
-    if (!doc) {
-      return res.status(404).json({
-        success: false,
-        message: "Mueble no encontrado"
-      });
-    }
-
-    res.json({
-      success: true,
-      message: "Mueble eliminado exitosamente",
-      data: { _id: doc._id }
-    });
-
-  } catch (e) {
-    if (e.name === "CastError") {
-      return res.status(400).json({ success: false, message: "ID inválido" });
-    }
     res.status(500).json({ success: false, message: e.message });
   }
 };

@@ -1,6 +1,7 @@
 import Inmueble from "../models/Inmueble.js";
+import { createCRUDController } from "../utils/crudFactory.js";
 
-// Todos los campos string de bienes_generales_inmuebles (13 campos)
+// Campos de búsqueda (los tuyos originales)
 const SEARCH_FIELDS = [
   "Número de inventario",
   "Clave Armonizada",
@@ -15,78 +16,58 @@ const SEARCH_FIELDS = [
   "Observaciones",
 ];
 
-export const getAll = async (req, res) => {
-  try {
-    const { q, page = 1, limit = 50, uso, forma, situacion, responsable } = req.query;
-    const pageNum = Math.max(1, parseInt(page));
-    const limitNum = Math.min(200, Math.max(1, parseInt(limit)));
-    const filter = {};
-    if (q) { const r = new RegExp(q, "i"); filter.$or = SEARCH_FIELDS.map((f) => ({ [f]: r })); }
-    if (uso)         filter["Uso o destino"]          = new RegExp(uso, "i");
-    if (forma)       filter["Forma de adquisición"]   = new RegExp(forma, "i");
-    if (situacion)   filter["Situación legal del bien inmueble"] = new RegExp(situacion, "i");
-    if (responsable) filter["Responsable de la guardia y custodia del documento que ampara la propiedad"] = new RegExp(responsable, "i");
-    const [docs, total] = await Promise.all([
-      Inmueble.find(filter).skip((pageNum - 1) * limitNum).limit(limitNum).lean(),
-      Inmueble.countDocuments(filter),
-    ]);
-    res.json({ success: true, total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum), data: docs });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
-};
+// 🔥 base factory
+const base = createCRUDController(Inmueble, SEARCH_FIELDS);
 
+// ─────────────────────────────────────────────
+// CRUD (automático)
+export const getAll = base.getAll;
+export const getById = base.getById;
+export const create = base.create;
+export const update = base.update;
+export const patch = base.patch;
+export const remove = base.remove;
+
+// ─────────────────────────────────────────────
+// 🔥 STATS (filtrando eliminados)
 export const getStats = async (req, res) => {
   try {
     const [total, porUso, porForma, porSituacion] = await Promise.all([
-      Inmueble.countDocuments(),
-      Inmueble.aggregate([{ $group: { _id: "$Uso o destino", count: { $sum: 1 } } }, { $sort: { count: -1 } }]),
-      Inmueble.aggregate([{ $group: { _id: "$Forma de adquisición", count: { $sum: 1 } } }, { $sort: { count: -1 } }]),
-      Inmueble.aggregate([{ $group: { _id: "$Situación legal del bien inmueble", count: { $sum: 1 } } }, { $sort: { count: -1 } }]),
+      Inmueble.countDocuments({ estado: { $ne: "baja" } }),
+
+      Inmueble.aggregate([
+        { $match: { estado: { $ne: "baja" } } },
+        { $group: { _id: "$Uso o destino", count: { $sum: 1 } } },
+        { $sort: { count: -1 } }
+      ]),
+
+      Inmueble.aggregate([
+        { $match: { estado: { $ne: "baja" } } },
+        { $group: { _id: "$Forma de adquisición", count: { $sum: 1 } } },
+        { $sort: { count: -1 } }
+      ]),
+
+      Inmueble.aggregate([
+        { $match: { estado: { $ne: "baja" } } },
+        { $group: { _id: "$Situación legal del bien inmueble", count: { $sum: 1 } } },
+        { $sort: { count: -1 } }
+      ])
     ]);
-    res.json({ success: true, data: { total, por_uso: porUso, por_forma_adquisicion: porForma, por_situacion_legal: porSituacion } });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
-};
 
-export const getById = async (req, res) => {
-  try {
-    const doc = await Inmueble.findById(req.params.id).lean();
-    if (!doc) return res.status(404).json({ success: false, message: "Inmueble no encontrado" });
-    res.json({ success: true, data: doc });
+    res.json({
+      success: true,
+      data: {
+        total,
+        por_uso: porUso,
+        por_forma_adquisicion: porForma,
+        por_situacion_legal: porSituacion
+      }
+    });
+
   } catch (e) {
-    if (e.name === "CastError") return res.status(400).json({ success: false, message: "ID inválido" });
-    res.status(500).json({ success: false, message: e.message });
-  }
-};
-
-export const create = async (req, res) => {
-  try {
-    await Inmueble.collection.insertOne(req.body);
-    res.status(201).json({ success: true, message: "Inmueble creado exitosamente", data: req.body });
-  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
-};
-
-export const update = async (req, res) => {
-  try {
-    const result = await Inmueble.collection.findOneAndUpdate(
-      { _id: new Inmueble.base.Types.ObjectId(req.params.id) },
-      { $set: req.body },
-      { returnDocument: "after" }
-    );
-    if (!result.value) return res.status(404).json({ success: false, message: "Inmueble no encontrado" });
-    res.json({ success: true, message: "Inmueble actualizado exitosamente", data: result.value });
-  } catch (e) {
-    if (e.name === "CastError") return res.status(400).json({ success: false, message: "ID inválido" });
-    res.status(500).json({ success: false, message: e.message });
-  }
-};
-export const patch = update;
-
-export const remove = async (req, res) => {
-  try {
-    const doc = await Inmueble.findByIdAndDelete(req.params.id).lean();
-    if (!doc) return res.status(404).json({ success: false, message: "Inmueble no encontrado" });
-    res.json({ success: true, message: "Inmueble eliminado exitosamente", data: { _id: doc._id } });
-  } catch (e) {
-    if (e.name === "CastError") return res.status(400).json({ success: false, message: "ID inválido" });
-    res.status(500).json({ success: false, message: e.message });
+    res.status(500).json({
+      success: false,
+      message: e.message
+    });
   }
 };
